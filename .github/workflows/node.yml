@@ -1,0 +1,66 @@
+name: Go
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - { name: "server", tag: "webserver", dockerfile: "Dockerfile" }
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set TAG_NAME
+        id: set_tag_name
+        run: |
+          if [ "${GITHUB_REF_NAME}" == "dev" ]; then
+            echo "TAG_NAME=dev" >> $GITHUB_ENV
+          else
+            echo "TAG_NAME=latest" >> $GITHUB_ENV
+          fi
+
+      - name: Set build date
+        run: echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_ENV
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ghcr.io/toyz/nw/${{ matrix.project.tag }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          file: ${{ matrix.project.dockerfile }}
+          push: true
+          tags: |
+            ghcr.io/toyz/twitch-emotes/${{ matrix.project.tag }}:${{ env.TAG_NAME }},
+            ghcr.io/toyz/twitch-emotes/${{ matrix.project.tag }}:${{ github.sha }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            project=${{ matrix.project.name }}
+            version=${{ github.sha }}
+            build_date=${{ env.BUILD_DATE }}
+            commit_sha=${{ github.sha }}
+            tag_name=${{ env.TAG_NAME }}
+            commit_message=${{ github.event.head_commit.message }}
+            commit_author=${{ github.event.head_commit.author.name }}
