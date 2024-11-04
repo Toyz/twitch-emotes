@@ -2,7 +2,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import cors from "cors";
-import express from "express";
+import express, { type Request, type Response } from "express";
 import Redis from "ioredis";
 import { TwitchAppAuthFlow } from "./app_auth_flow";
 import { logger } from "./logger";
@@ -30,7 +30,7 @@ app.get("/:userId", async (req, res) => {
   }
 
   try {
-    const emotes = await getEmotes(userId.toLowerCase());
+    const emotes = await getEmotes(userId.toLowerCase(), res);
     res.json(emotes);
   } catch (err) {
     logger.error(`Failed to get emotes: ${err}`);
@@ -39,7 +39,7 @@ app.get("/:userId", async (req, res) => {
 });
 
 // get emote by name
-app.get("/:userId/:emoteName", async (req, res) => {
+app.get("/:userId/:emoteName", async (req: Request, res: Response) => {
   const { userId, emoteName } = req.params;
 
   if (!userId || !emoteName) {
@@ -47,7 +47,7 @@ app.get("/:userId/:emoteName", async (req, res) => {
   }
 
   try {
-    const emotes = await getEmotes(userId.toLowerCase());
+    const emotes = await getEmotes(userId.toLowerCase(), res);
     const emoteNameLower = emoteName.toLowerCase();
 
     const emoteEntry = Object.entries(emotes).find(
@@ -65,7 +65,7 @@ app.get("/:userId/:emoteName", async (req, res) => {
       id: emote.id,
       sizes: emote.sizes,
     });
-  } catch (err) {
+  } catch (err: any) {
     logger.error(`Failed to get emote for user ${userId}: ${err.message}`);
     res.status(500).json({ error: "Failed to get emote" });
   }
@@ -78,7 +78,8 @@ app.listen(port, () => {
 });
 
 async function getEmotes(
-  userId: string
+  userId: string,
+  res: Response
 ): Promise<Record<string, { id: string; sizes: Record<string, string> }>> {
   const token = await auth.getAccessToken();
   if (!token) {
@@ -105,10 +106,17 @@ async function getEmotes(
   const emotesKey = `emotes:${boardcasterId}`;
   const cachedEmotes = await commandRedis.get(emotesKey);
   if (cachedEmotes) {
+    // get ttl and set as x-cache-ttl header
+    const ttl = await commandRedis.ttl(emotesKey);
+    res.set("x-cache-ttl", ttl.toString());
+    res.set("x-cache", "hit");
+
     return JSON.parse(cachedEmotes);
   }
 
   try {
+    res.set("x-cache", "miss");
+
     const emotes = await twitchFetcher.getEmotesForUser(boardcasterId);
     const emotesMap = emotes.reduce(
       (acc, emote) => {
